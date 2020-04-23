@@ -1,7 +1,11 @@
 package com.yijiupi.flink.actuator.controller;
 
+import com.alibaba.fastjson.JSONObject;
 import com.google.common.collect.Lists;
-import com.yijiupi.flink.actuator.entity.*;
+import com.yijiupi.flink.actuator.entity.AggFunType;
+import com.yijiupi.flink.actuator.entity.ColumnInfo;
+import com.yijiupi.flink.actuator.entity.TableInfo;
+import com.yijiupi.flink.actuator.entity.TableSinkInfo;
 import com.yijiupi.flink.actuator.service.ITableParamsService;
 import org.apache.calcite.config.Lex;
 import org.apache.calcite.sql.*;
@@ -12,10 +16,7 @@ import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseBody;
 
-import java.io.BufferedWriter;
-import java.io.File;
-import java.io.FileWriter;
-import java.io.IOException;
+import java.io.*;
 import java.util.*;
 
 import static org.apache.calcite.sql.SqlKind.AS;
@@ -90,7 +91,7 @@ public class TableParamsController {
 
     }
 
-    private String sourceTable = "loginlog";
+    private String sourceTable = "bizuser_realtime_hh";
 
     private String sql1 = "select\n" +
             "\t  llw.id\n" +
@@ -162,7 +163,7 @@ public class TableParamsController {
 
     @ResponseBody
     @RequestMapping("/queryTableParams")
-    public void userList() throws SqlParseException, IOException {
+    public void userList(String fileName) throws SqlParseException, IOException {
         //todo  通过source name查询TableParams表 然后判断该表是否为主表 如果是维表则报错
         sql1 = sql1.replaceAll("--.*", "")
                 .replaceAll("\r\n", " ")
@@ -206,7 +207,7 @@ public class TableParamsController {
                         tableInfo.getColumnInfo().add(columnInfo);
                     }
                 }
-                System.out.println(tableInfo.getTableAlias());
+//                System.out.println(tableInfo.getTableAlias());
             }
         }
 
@@ -248,12 +249,90 @@ public class TableParamsController {
         }
         tableSinkInfo.setTableName(sinkTableName);
         //利用现有的字段和类型写文件 文件名称为任务名称
-        writerFile(selectFieldMapper, tableSinkInfo, "test", sqlParseResult);
+        writerFile(selectFieldMapper, tableSinkInfo, fileName, sqlParseResult);
         System.out.println("填充完成");
+        invokeStreamSqlShell(fileName);
+        //todo restful api 查job状态
+    }
+
+    public void invokeStreamSqlShell(String fileName) {
+        try {
+//            String shpath = "sh /data/flink-stream-sql/bin/submit.sh -sql " +
+//                    " /data/flink-stream-sql/" + fileName + ".txt " +
+//                    " -name  " + fileName + " " +
+//                    " -remoteSqlPluginPath /data/flink-stream-sql/plugins/ -localSqlPluginPath /data/flink-stream-sql/plugins -mode yarn -flinkconf /data/flink-1.8.0/conf -yarnconf /etc/hadoop/conf  -confProp \\{\\\"sql.checkpoint.interval\\\":300000,\\\"sql.checkpoint.mode\\\":\\\"EXACTLY_ONCE\\\",\\\"sql.checkpoint.timeout\\\":3600000,\\\"sql.max.concurrent.checkpoints\\\":1,\\\"flinkCheckpointDataURI\\\":\\\"hdfs://nameservice1/flink-checkpoints\\\",\\\"sql.checkpoint.state.backend.mode\\\":\\\"RocksDBStateBackend\\\"\\} \n -yarnSessionConf \\{\\\"yname\\\":\\\"bi-report\\\"\\} ";
+            Map<String, Object> conf = new HashMap<>();
+            conf.put("time.characteristic", "EventTime");
+            conf.put("sql.checkpoint.interval", 10000);
+//            JSONObject.toJSONString(conf);
+
+            Map<String, Object> yarn = new HashMap<>();
+            yarn.put("yid", "application_1587204103178_0023");
+//            JSONObject.toJSONString(yarn);
+
+            ProcessBuilder pb = new ProcessBuilder(
+                    new String[]{
+                            "java",
+                            "-cp",
+                            "/data/flink-stream-sql/lib/*",
+                            "com.dtstack.flink.sql.launcher.LauncherMain",
+                            "$@",
+                            "-sql",
+                            "/data/flink-stream-sql/start-sql/bi/dm_order_categorysalemode_realtime_hh.txt",
+                            "-name",
+                            "dm_order_categorysalemode_realtime_hh",
+                            "-remoteSqlPluginPath",
+                            "/data/flink-stream-sql/plugins/",
+                            "-localSqlPluginPath",
+                            "/data/flink-stream-sql/plugins/",
+                            "-mode",
+                            "yarn",
+                            "-flinkconf",
+                            "/data/flink-1.8.0/conf",
+                            "-yarnconf",
+                            "/etc/hadoop/conf",
+                            "-confProp",
+                            JSONObject.toJSONString(conf),
+                            "-yarnSessionConf",
+                            JSONObject.toJSONString(yarn)
+                    }
+            );
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+            InputStream is = p.getInputStream();
+            int in = -1;
+            while ((in = is.read()) != -1) {
+                System.out.print((char) in);
+            }
+            p.waitFor();
+            int exitWith = p.exitValue();
+            System.out.println("\nExited with " + exitWith);
+
+//            String shellPatch = "java -cp /data/flink-stream-sql/lib/* com.dtstack.flink.sql.launcher.LauncherMain $@ -sql /data/flink-stream-sql/start-sql/bi/dm_order_categorysalemode_realtime_hh.txt -name dm_order_categorysalemode_realtime_hh  -remoteSqlPluginPath /data/flink-stream-sql/plugins/  -localSqlPluginPath /data/flink-stream-sql/plugins/  -mode yarn -flinkconf /data/flink-1.8.0/conf -yarnconf /etc/hadoop/conf -confProp \\{\\\"time.characteristic\\\":\\\"EventTime\\\",\\\"sql.checkpoint.interval\\\":10000\\} -yarnSessionConf \\{\\\"yid\\\":\\\"application_1587204103178_0023\\\"}";
+//            Process ps = Runtime.getRuntime().exec(shellPatch);
+//            System.out.println(shellPatch);
+//            int exitValue = ps.waitFor();
+//            if (0 != exitValue) {
+//                System.out.println("call shell failed. error code is :" + exitValue);
+//            }
+//
+//            BufferedReader br = new BufferedReader(new InputStreamReader(ps.getInputStream()));
+//            StringBuilder sb = new StringBuilder();
+//            String line;
+//            while ((line = br.readLine()) != null) {
+//                sb.append(line).append("\n");
+//            }
+//            String result = sb.toString();
+//            System.out.println(result);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        System.out.println("调用成功");
     }
 
     private void writerFile(Map<String, ColumnInfo> selectFieldMapper, TableSinkInfo tableSinkInfo, String fileName, SqlParseResult sqlParseResult) throws IOException {
-        File file = new File("test.txt");
+//        File file = new File("/data/flink-stream-sql/" + fileName + ".txt");
+        File file = new File(fileName + ".txt");
         if (!file.exists()) {
             file.createNewFile();
         }
@@ -300,16 +379,65 @@ public class TableParamsController {
                 stringBuffer.append("\t").append(",PRIMARY KEY(").append(primaryKey).append(")\n")
                         .append("\t").append(",PERIOD FOR SYSTEM_TIME \n");
             }
-            stringBuffer.append(")WITH( ").append("\n").append(");").append("\n");
+            //todo 不同的表在with中添加不同的配置
+            if ("bizuser_realtime_hh".equalsIgnoreCase(tableInfo.getTableName())) {
+                stringBuffer.append(")WITH( ").append("\n")
+                        .append("    type ='kafka11',\n" +
+                                "    bootstrapServers ='197.255.20.213:9092',\n" +
+                                "    offsetReset ='latest',\n" +
+                                "\tgroupId='bi_report_agg',\n" +
+                                "    topic ='flink_bi_report'")
+                        .append(");").append("\n");
+            }
+
+            if ("city".equalsIgnoreCase(tableInfo.getTableName())) {
+                stringBuffer.append(")WITH( ").append("\n")
+                        .append("    type='kudu',\n" +
+                                "    kuduMasters ='197.255.20.216,197.255.20.217,197.255.20.218',\n" +
+                                "    tableName ='impala::yjp_lz_trd_admin.city',\n" +
+                                "    cache ='LRU',\n" +
+                                "    partitionedJoin='false' ")
+                        .append(");").append("\n");
+            }
+
+            if ("etl_categorygroup".equalsIgnoreCase(tableInfo.getTableName())) {
+                stringBuffer.append(")WITH( ").append("\n")
+                        .append("     type='kudu',\n" +
+                                "    kuduMasters ='197.255.20.216,197.255.20.217,197.255.20.218',\n" +
+                                "    tableName ='impala::yjp_config.etl_categorygroup',\n" +
+                                "    cache ='LRU',\n" +
+                                "    partitionedJoin='false' ")
+                        .append(");").append("\n");
+            }
+
+            if ("salemode".equalsIgnoreCase(tableInfo.getTableName())) {
+                stringBuffer.append(")WITH( ").append("\n")
+                        .append("   type='kudu',\n" +
+                                "    kuduMasters ='197.255.20.216,197.255.20.217,197.255.20.218',\n" +
+                                "    tableName ='impala::yjp_dw.dic_trd_salemode',\n" +
+                                "    cache ='LRU',\n" +
+                                "    partitionedJoin='false' ")
+                        .append(");").append("\n");
+            }
+
+//            stringBuffer.append(")WITH( ").append("\n").append(");").append("\n");
         }
 
         stringBuffer.append("CREATE TABLE ").append(tableSinkInfo.getTableName()).append(" (\n");
+        //todo  如果sink多处可以修改循环
         for (ColumnInfo columnInfo : tableSinkInfo.getList()) {
             stringBuffer.append("\t").append(columnInfo.getSinkColumnName()).append("  ")
                     .append(columnInfo.getSinkColumnType()).append(" ,").append("\n");
         }
         stringBuffer.deleteCharAt(stringBuffer.length() - 2);
-        stringBuffer.append(")WITH( ").append("\n").append(");").append("\n");
+        stringBuffer.append(")WITH( ").append("\n")
+                .append("     type ='kafka11',\n" +
+                        "    bootstrapServers ='197.255.20.213:9092',\n" +
+                        "    topic ='flink_bi_report_sum',\n" +
+                        "\tkafka.retries='3',\n" +
+                        "    parallelism ='1' ")
+                .append(");").append("\n");
+//        stringBuffer.append(")WITH( ").append("\n").append(");").append("\n");
         stringBuffer.append("insert into ").append(tableSinkInfo.getTableName()).append("\n")
                 .append(sqlParseResult.getExecSql()).append(";");
         return stringBuffer.toString();
@@ -529,7 +657,7 @@ public class TableParamsController {
 
     private void parseOnNode(SqlNode sqlNode, Map<String, ColumnInfo> selectFieldMapper) {
         //通过on获取维表主键  然后打标
-        System.out.println(sqlNode.toString());
+//        System.out.println(sqlNode.toString());
         SqlNode joinNode = ((SqlJoin) sqlNode).getCondition();
         SqlKind sqlKind = joinNode.getKind();
         switch (sqlKind) {
@@ -577,7 +705,7 @@ public class TableParamsController {
                 //do nothing
                 break;
         }
-        System.out.println(sqlNode.toString());
+//        System.out.println(sqlNode.toString());
     }
 
     private void setWhereField(Map<String, ColumnInfo> selectFieldMapper, String operandString) {
